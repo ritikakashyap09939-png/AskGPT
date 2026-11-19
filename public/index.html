@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="hi" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AskGPT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar" aria-label="Chat sidebar">
+      <div class="sidebar-header">
+        <a class="logo" href="#" aria-label="AskGPT home">
+          <span class="logo-icon" aria-hidden="true">A</span>
+          <span class="logo-text">AskGPT</span>
+        </a>
+        <button class="icon-btn sidebar-close" id="sidebar-close-btn" aria-label="Close sidebar">
+          <span aria-hidden="true">&#10005;</span>
+        </button>
+      </div>
+
+      <button class="new-chat-btn" id="new-chat-btn" aria-label="Start a new chat">
+        <span class="new-chat-icon" aria-hidden="true">+</span>
+        <span>New chat</span>
+      </button>
+
+      <div class="sidebar-section">
+        <h2 class="sidebar-heading">Recent</h2>
+        <ul class="chat-list" id="chat-list"></ul>
+      </div>
+
+      <div class="sidebar-footer">
+        <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
+          <span class="theme-toggle-icon" aria-hidden="true">&#127769;</span>
+          <span class="theme-toggle-label">Dark mode</span>
+          <span class="theme-toggle-track" aria-hidden="true"><span class="theme-toggle-thumb"></span></span>
+        </button>
+      </div>
+    </aside>
+
+    <div class="sidebar-overlay" id="sidebar-overlay" hidden></div>
+
+    <main class="main" id="main">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open sidebar">
+          <span class="menu-btn-bar" aria-hidden="true"></span>
+          <span class="menu-btn-bar" aria-hidden="true"></span>
+          <span class="menu-btn-bar" aria-hidden="true"></span>
+        </button>
+        <h1 class="topbar-title">AskGPT</h1>
+      </header>
+
+      <div class="chat-scroll" id="chat-scroll">
+        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+          <div class="welcome-logo" aria-hidden="true">A</div>
+          <h2 class="welcome-title" id="welcome-title">Namaste! Main AskGPT hoon</h2>
+          <p class="welcome-subtitle">Hindi, English ya Hinglish, jo bhi poochho</p>
+          <div class="suggestions" id="suggestions">
+            <button class="suggestion-card" type="button" data-suggestion="Explain something simply" aria-label="Explain something simply">
+              Explain something simply
+            </button>
+            <button class="suggestion-card" type="button" data-suggestion="Help me write code" aria-label="Help me write code">
+              Help me write code
+            </button>
+            <button class="suggestion-card" type="button" data-suggestion="Hindi mein ek kahani sunao" aria-label="Hindi mein ek kahani sunao">
+              Hindi mein ek kahani sunao
+            </button>
+            <button class="suggestion-card" type="button" data-suggestion="Give me study tips" aria-label="Give me study tips">
+              Give me study tips
+            </button>
+          </div>
+        </section>
+
+        <section class="messages" id="messages" aria-label="Chat messages" aria-live="polite" hidden></section>
+      </div>
+
+      <footer class="composer" id="composer">
+        <div class="composer-inner">
+          <button class="icon-btn mic-btn" id="mic-btn" aria-label="Start voice input">
+            <span class="mic-btn-icon" aria-hidden="true">&#127908;</span>
+          </button>
+
+          <textarea
+            id="user-input"
+            class="user-input"
+            rows="1"
+            placeholder="Kuch bhi poochho..."
+            aria-label="Message"
+          ></textarea>
+
+          <button class="send-btn" id="send-btn" aria-label="Send message" disabled>
+            <span class="send-btn-icon" aria-hidden="true">&#10148;</span>
+          </button>
+        </div>
+
+        <div class="composer-meta">
+          <label class="lang-field" for="lang-select">
+            <span class="visually-hidden">Language</span>
+            <select id="lang-select" class="lang-select" aria-label="Select language">
+              <option value="hi-IN">Hindi hi-IN</option>
+              <option value="en-IN">English en-IN</option>
+            </select>
+          </label>
+
+          <button class="stop-speaking-btn" id="stop-speaking-btn" aria-label="Stop speaking" hidden>
+            <span class="stop-btn-icon" aria-hidden="true">&#9632;</span>
+            <span>Stop speaking</span>
+          </button>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
