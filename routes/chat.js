@@ -82,14 +82,36 @@ for (const m of messages) {
     if (stream) {
       // Server-Sent Events streaming
       res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
         Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
       });
+      // Flush the headers immediately so proxies don't buffer the response
+      res.flushHeaders();
+      res.write(': ping\n\n');
 
       const controller = new AbortController();
+
+      // Keep the connection alive while waiting for the first token
+      const ping = setInterval(() => {
+        if (!res.writableEnded) {
+          try {
+            res.write(': ping\n\n');
+          } catch (err) {
+            /* ignore write errors */
+          }
+        }
+      }, 15000);
+
       res.on('close', () => {
-        if (!res.writableEnded) controller.abort();
+        console.log(
+          `[SSE] res 'close' event; writableEnded=${res.writableEnded}, destroyed=${res.destroyed}`
+        );
+        if (!res.writableEnded) {
+          console.log('[SSE] client closed connection before completion; aborting upstream request');
+          controller.abort();
+        }
       });
 
       let fullReply = '';
@@ -109,11 +131,13 @@ for (const m of messages) {
       } catch (err) {
         console.error('Stream error:', err.message);
         if (controller.signal.aborted) {
-          // Client disconnected; do not write anything
+          console.log('[SSE] upstream request was aborted because the client disconnected');
           return;
         }
         res.write(`data: ${JSON.stringify({ error: err.code || 'SERVER_ERROR' })}\n\n`);
         res.end();
+      } finally {
+        clearInterval(ping);
       }
     } else {
       const reply = await llm.chatCompletion(fullMessages);

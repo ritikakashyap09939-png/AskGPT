@@ -31,7 +31,7 @@ async function chatCompletion(messages, options = {}) {
       temperature: options.temperature ?? 0.7,
       max_tokens: options.max_tokens ?? 1024,
     }),
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(120000),
   });
 
   if (!res.ok) {
@@ -71,7 +71,11 @@ async function streamChatCompletion(messages, onChunk, options = {}) {
   const controller = new AbortController();
   const externalSignal = options.signal;
   if (externalSignal) {
-    externalSignal.addEventListener('abort', () => controller.abort());
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener('abort', () => controller.abort());
+    }
   }
 
   const res = await fetch(`${API_BASE}/chat/completions`, {

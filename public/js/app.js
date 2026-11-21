@@ -536,26 +536,61 @@ document.addEventListener('DOMContentLoaded', function () {
       var contentType = response.headers.get('content-type') || '';
 
       if (contentType.indexOf('text/event-stream') !== -1 && response.body && response.body.getReader) {
-        await readStream(response, function (event) {
-          if (event.error) {
-            var streamErr = new Error(event.error);
-            streamErr.code = event.error;
+        try {
+          await readStream(response, function (event) {
+            if (event.error) {
+              var streamErr = new Error(event.error);
+              streamErr.code = event.error;
+              throw streamErr;
+            }
+
+            if (typeof event.chunk === 'string') {
+              ensureBot();
+              full += event.chunk;
+              UI.renderMarkdown(bot.content, full);
+              UI.scrollToBottom();
+            }
+
+            if (event.done) {
+              if (typeof event.reply === 'string' && event.reply) {
+                full = event.reply;
+              }
+            }
+          });
+        } catch (streamErr) {
+          if (streamErr && (streamErr.name === 'AbortError' || streamErr.code === 'ABORT_ERR')) {
             throw streamErr;
           }
 
-          if (typeof event.chunk === 'string') {
-            ensureBot();
-            full += event.chunk;
-            UI.renderMarkdown(bot.content, full);
-            UI.scrollToBottom();
+          console.warn('Streaming failed, retrying without streaming:', streamErr && streamErr.message);
+
+          var fallbackResponse = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller ? controller.signal : undefined,
+            body: JSON.stringify({
+              messages: requestMessages,
+              inputMode: inputMode,
+              stream: false
+            })
+          });
+
+          var fallbackBody = {};
+          try {
+            fallbackBody = await fallbackResponse.json();
+          } catch (parseErr) {
+            fallbackBody = {};
           }
 
-          if (event.done) {
-            if (typeof event.reply === 'string' && event.reply) {
-              full = event.reply;
-            }
+          if (!fallbackResponse.ok || fallbackBody.error) {
+            handleError((fallbackBody && fallbackBody.error) || 'SERVER_ERROR', lastUserText);
+            return;
           }
-        });
+
+          full = fallbackBody.reply || '';
+          ensureBot();
+          UI.renderMarkdown(bot.content, full);
+        }
       } else {
         var data = await response.json();
         if (data.error) {
