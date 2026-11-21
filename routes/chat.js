@@ -4,6 +4,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const llm = require('../services/llm');
 const SYSTEM_PROMPT = require('../config/systemPrompt');
+const auth = require('../middleware/auth');
 
 // Dedicated rate limiter for /api/chat: 20 requests per minute per IP
 const chatLimiter = rateLimit({
@@ -19,7 +20,7 @@ const chatLimiter = rateLimit({
  * Body: { messages: [{role, content}], inputMode: "text"|"voice", stream?: boolean }
  * Returns: { reply } or streaming text/event-stream
  */
-router.post('/chat', chatLimiter, async (req, res) => {
+router.post('/chat', auth, chatLimiter, async (req, res) => {
   try {
     const { messages, inputMode, stream } = req.body;
 
@@ -27,13 +28,50 @@ router.post('/chat', chatLimiter, async (req, res) => {
       return res.status(400).json({ error: 'INVALID_INPUT' });
     }
 
-    // Validate each message
-    const MAX_LENGTH = 4000;
-    for (const m of messages) {
-      if (typeof m.content !== 'string' || m.content.length > MAX_LENGTH) {
-        return res.status(400).json({ error: 'INVALID_INPUT' });
+// Validate each message
+const MAX_LENGTH = 4000;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+function isValidContent(content) {
+  if (typeof content === 'string') {
+    return content.length <= MAX_LENGTH;
+  }
+
+  if (Array.isArray(content)) {
+    if (content.length === 0) return false;
+
+    return content.every((part) => {
+      if (!part || typeof part !== 'object') return false;
+
+      if (part.type === 'text') {
+        return typeof part.text === 'string' && part.text.length <= MAX_LENGTH;
       }
-    }
+
+      if (part.type === 'image_url') {
+        const url = part.image_url && part.image_url.url;
+        if (typeof url !== 'string') return false;
+
+        const match = url.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+        if (!match) return false;
+        if (ALLOWED_IMAGE_TYPES.indexOf(match[1]) === -1) return false;
+
+        const bytes = Math.floor((match[2].length * 3) / 4);
+        return bytes > 0 && bytes <= MAX_IMAGE_BYTES;
+      }
+
+      return false;
+    });
+  }
+
+  return false;
+}
+
+for (const m of messages) {
+  if (!m || typeof m !== 'object' || !isValidContent(m.content)) {
+    return res.status(400).json({ error: 'INVALID_INPUT' });
+  }
+}
 
     // Build the full message list with system prompt first
     const fullMessages = [

@@ -56,7 +56,7 @@ const UI = (function () {
     if (messages) messages.hidden = !!show;
   }
 
-  function addUserMessage(text) {
+  function addUserMessage(text, imageSrc) {
     const root = document.createElement('div');
     root.className = 'message user';
 
@@ -66,7 +66,21 @@ const UI = (function () {
 
     const content = document.createElement('div');
     content.className = 'message-content';
-    content.innerHTML = withLineBreaks(text);
+
+    if (imageSrc) {
+      const img = document.createElement('img');
+      img.className = 'msg-image';
+      img.src = imageSrc;
+      img.alt = 'Attached image';
+      content.appendChild(img);
+    }
+
+    if (text) {
+      const textEl = document.createElement('div');
+      textEl.className = 'msg-text';
+      textEl.innerHTML = withLineBreaks(text);
+      content.appendChild(textEl);
+    }
 
     root.appendChild(avatar);
     root.appendChild(content);

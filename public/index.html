@@ -54,6 +54,19 @@
         <h1 class="topbar-title">AskGPT</h1>
       </header>
 
+      <div class="main-toolbar" id="main-toolbar">
+        <div class="export-wrap">
+          <button class="export-btn" id="export-btn" aria-label="Export chat" hidden>
+            <span class="export-btn-icon" aria-hidden="true">&#11015;</span>
+            <span>Export chat</span>
+          </button>
+          <div class="export-menu" id="export-menu" hidden>
+            <button class="export-menu-item" type="button" data-export="txt">Download as .txt</button>
+            <button class="export-menu-item" type="button" data-export="pdf">Download as PDF</button>
+          </div>
+        </div>
+      </div>
+
       <div class="chat-scroll" id="chat-scroll">
         <section class="welcome" id="welcome" aria-labelledby="welcome-title">
           <div class="welcome-logo" aria-hidden="true">A</div>
@@ -82,7 +95,16 @@
       </div>
 
       <footer class="composer" id="composer">
+        <div class="attachment-preview" id="attachment-preview" hidden>
+          <img id="attachment-img" alt="Image preview" />
+          <button class="attachment-remove" id="attachment-remove" type="button" aria-label="Remove image">×</button>
+        </div>
         <div class="composer-inner">
+          <button class="icon-btn attach-btn" id="attach-btn" type="button" aria-label="Attach image">
+            <span class="attach-btn-icon" aria-hidden="true">&#128206;</span>
+          </button>
+          <input type="file" id="image-input" accept="image/*" hidden />
+
           <button class="icon-btn mic-btn" id="mic-btn" aria-label="Start voice input">
             <span class="mic-btn-icon" aria-hidden="true">&#127908;</span>
           </button>
