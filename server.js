@@ -73,6 +73,11 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', model: process.env.MODEL_NAME || 'gpt-4o-mini' });
 });
 
+// Runtime config for the frontend (guest mode when no database)
+app.get('/api/config', (req, res) => {
+  res.json({ authEnabled: !!process.env.MONGODB_URI });
+});
+
 // Catch-all: serve index.html for SPA
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -89,5 +94,5 @@ if (process.env.MONGODB_URI) {
     .then(() => console.log('MongoDB connected'))
     .catch((err) => console.error('MongoDB connection error:', err.message));
 } else {
-  console.warn('MONGODB_URI not set; auth and chats will not work.');
+  console.warn('MONGODB_URI not set; running in guest mode (no login required, chats use localStorage).');
 }

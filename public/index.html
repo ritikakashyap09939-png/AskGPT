@@ -34,6 +34,10 @@
       </div>
 
       <div class="sidebar-footer">
+        <div class="user-box" id="user-box" hidden>
+          <span class="user-email" id="user-email"></span>
+          <button class="logout-btn" id="logout-btn" type="button">Log out</button>
+        </div>
         <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" aria-pressed="false">
           <span class="theme-toggle-icon" aria-hidden="true">&#127769;</span>
           <span class="theme-toggle-label">Dark mode</span>
@@ -138,6 +142,29 @@
         </div>
       </footer>
     </main>
+  </div>
+
+  <div class="auth-modal" id="auth-modal" hidden>
+    <div class="auth-card" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <h2 class="auth-title" id="auth-title">Log in</h2>
+      <p class="auth-subtitle">Apne account se login karo</p>
+      <form class="auth-form" id="auth-form">
+        <label class="auth-field">
+          <span>Email</span>
+          <input type="email" id="auth-email" autocomplete="email" required />
+        </label>
+        <label class="auth-field">
+          <span>Password</span>
+          <input type="password" id="auth-password" autocomplete="current-password" minlength="8" required />
+        </label>
+        <p class="auth-error" id="auth-error" hidden></p>
+        <button class="auth-submit" type="submit" id="auth-submit">Log in</button>
+      </form>
+      <p class="auth-switch">
+        <span id="auth-switch-label">Naya account?</span>
+        <button class="auth-switch-btn" type="button" id="auth-switch-btn">Sign up</button>
+      </p>
+    </div>
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>

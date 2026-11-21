@@ -6,6 +6,20 @@ const llm = require('../services/llm');
 const SYSTEM_PROMPT = require('../config/systemPrompt');
 const auth = require('../middleware/auth');
 
+// Guest mode when no database is configured: skip JWT auth for /api/chat
+const AUTH_ENABLED = !!process.env.MONGODB_URI;
+
+function maybeAuth(req, res, next) {
+  if (!AUTH_ENABLED) return next();
+  return auth(req, res, next);
+}
+
+function logFailure(context, err, status) {
+  const code = status || (err && (err.status || err.statusCode)) || 500;
+  const message = err && err.message ? err.message : err;
+  console.error(`[${context}] status=${code} message=${message}`);
+}
+
 // Dedicated rate limiter for /api/chat: 20 requests per minute per IP
 const chatLimiter = rateLimit({
   windowMs: 60000,
@@ -20,11 +34,12 @@ const chatLimiter = rateLimit({
  * Body: { messages: [{role, content}], inputMode: "text"|"voice", stream?: boolean }
  * Returns: { reply } or streaming text/event-stream
  */
-router.post('/chat', auth, chatLimiter, async (req, res) => {
+router.post('/chat', maybeAuth, chatLimiter, async (req, res) => {
   try {
     const { messages, inputMode, stream } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      logFailure('chat', new Error('INVALID_INPUT'), 400);
       return res.status(400).json({ error: 'INVALID_INPUT' });
     }
 
@@ -69,6 +84,7 @@ function isValidContent(content) {
 
 for (const m of messages) {
   if (!m || typeof m !== 'object' || !isValidContent(m.content)) {
+    logFailure('chat', new Error('INVALID_INPUT'), 400);
     return res.status(400).json({ error: 'INVALID_INPUT' });
   }
 }
@@ -129,7 +145,7 @@ for (const m of messages) {
         res.write(`data: ${JSON.stringify({ done: true, reply: fullReply })}\n\n`);
         res.end();
       } catch (err) {
-        console.error('Stream error:', err.message);
+        logFailure('stream', err);
         if (controller.signal.aborted) {
           console.log('[SSE] upstream request was aborted because the client disconnected');
           return;
@@ -144,7 +160,7 @@ for (const m of messages) {
       res.json({ reply });
     }
   } catch (err) {
-    console.error('Chat route error:', err.message);
+    logFailure('chat', err, 500);
     res.status(500).json({ error: err.code || 'SERVER_ERROR' });
   }
 });

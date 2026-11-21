@@ -9,6 +9,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var sending = false;
   var abortController = null;
   var pendingImage = null;
+  var authEnabled = false;
+  var token = null;
+  var currentUser = null;
+  var authMode = 'login';
 
   var ERROR_MESSAGES = {
     RATE_LIMIT: {
@@ -67,24 +71,232 @@ document.addEventListener('DOMContentLoaded', function () {
     return table[lang] || table.en || 'Something went wrong. Please try again.';
   }
 
+  // ---------------------- Auth / storage ----------------------
+
+  function authHeaders() {
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    return headers;
+  }
+
+  function setToken(value) {
+    token = value || null;
+    try {
+      if (token) localStorage.setItem('askgpt_token', token);
+      else localStorage.removeItem('askgpt_token');
+    } catch (err) {
+      /* ignore storage errors */
+    }
+  }
+
+  async function apiListChats() {
+    var res = await fetch('/api/chats', { headers: authHeaders() });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || 'SERVER_ERROR');
+    return data.chats || [];
+  }
+
+  async function apiCreateChat(title) {
+    var res = await fetch('/api/chats', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ title: title, messages: [] })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || 'SERVER_ERROR');
+    return data.chat;
+  }
+
+  async function apiSaveChat(chat) {
+    var res = await fetch('/api/chats/' + encodeURIComponent(chat.id), {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ title: chat.title, messages: chat.messages })
+    });
+    var data = await res.json().catch(function () { return {}; });
+    if (!res.ok) throw new Error(data.error || 'SERVER_ERROR');
+    return data.chat;
+  }
+
+  async function apiDeleteChat(id) {
+    var res = await fetch('/api/chats/' + encodeURIComponent(id), {
+      method: 'DELETE',
+      headers: authHeaders()
+    });
+    if (!res.ok) {
+      var data = await res.json().catch(function () { return {}; });
+      throw new Error(data.error || 'SERVER_ERROR');
+    }
+  }
+
+  var Store = {
+    list: async function () {
+      if (authEnabled) return await apiListChats();
+      return ChatStorage.loadChats();
+    },
+    create: async function (title) {
+      if (authEnabled) return await apiCreateChat(title);
+      return ChatStorage.createChat(title);
+    },
+    save: async function (chat) {
+      if (authEnabled) return await apiSaveChat(chat);
+      ChatStorage.updateChat(chat);
+      return chat;
+    },
+    remove: async function (id) {
+      if (authEnabled) return await apiDeleteChat(id);
+      ChatStorage.deleteChat(id);
+    }
+  };
+
+  function persistChat(chat) {
+    return Store.save(chat).catch(function (err) {
+      console.warn('Chat save failed:', err && err.message ? err.message : err);
+    });
+  }
+
+  // ---------------------- Auth UI ----------------------
+
+  function authErrorMessage(code) {
+    var map = {
+      INVALID_EMAIL: 'Email sahi nahi hai.',
+      WEAK_PASSWORD: 'Password kam se kam 8 characters ka hona chahiye.',
+      EMAIL_EXISTS: 'Ye email already registered hai.',
+      INVALID_CREDENTIALS: 'Email ya password galat hai.',
+      RATE_LIMIT: 'Bahut zyada requests. Thodi der baad try karo.',
+      SERVER_ERROR: 'Server error. Dobara try karo.',
+      UNAUTHORIZED: 'Login required hai.'
+    };
+    return map[code] || 'Kuch galat ho gaya. Dobara try karo.';
+  }
+
+  function updateAuthModal() {
+    var isLogin = authMode === 'login';
+    var title = $('auth-title');
+    if (title) title.textContent = isLogin ? 'Log in' : 'Sign up';
+    var submit = $('auth-submit');
+    if (submit) submit.textContent = isLogin ? 'Log in' : 'Sign up';
+    var label = $('auth-switch-label');
+    if (label) label.textContent = isLogin ? 'Naya account?' : 'Account hai?';
+    var sw = $('auth-switch-btn');
+    if (sw) sw.textContent = isLogin ? 'Sign up' : 'Log in';
+    var err = $('auth-error');
+    if (err) {
+      err.hidden = true;
+      err.textContent = '';
+    }
+  }
+
+  function showAuthModal(mode) {
+    authMode = mode === 'signup' ? 'signup' : 'login';
+    var modal = $('auth-modal');
+    if (modal) modal.hidden = false;
+    updateAuthModal();
+    var email = $('auth-email');
+    if (email) email.focus();
+  }
+
+  function hideAuthModal() {
+    var modal = $('auth-modal');
+    if (modal) modal.hidden = true;
+  }
+
+  function updateUserBox() {
+    var box = $('user-box');
+    var emailEl = $('user-email');
+    if (box) box.hidden = !currentUser;
+    if (emailEl) emailEl.textContent = currentUser || '';
+  }
+
+  async function handleAuthSubmit(ev) {
+    ev.preventDefault();
+
+    var emailEl = $('auth-email');
+    var passEl = $('auth-password');
+    var errEl = $('auth-error');
+    if (!emailEl || !passEl) return;
+
+    var email = emailEl.value.trim();
+    var password = passEl.value;
+
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = '';
+    }
+
+    try {
+      var res = await fetch('/api/auth/' + (authMode === 'login' ? 'login' : 'signup'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      });
+      var data = await res.json().catch(function () { return {}; });
+
+      if (!res.ok || !data.token) {
+        if (errEl) {
+          errEl.textContent = authErrorMessage(data.error);
+          errEl.hidden = false;
+        }
+        return;
+      }
+
+      setToken(data.token);
+      currentUser = (data.user && data.user.email) || email;
+      passEl.value = '';
+      hideAuthModal();
+      updateUserBox();
+      await loadChatsFromServer();
+    } catch (err) {
+      if (errEl) {
+        errEl.textContent = 'Network error. Dobara try karo.';
+        errEl.hidden = false;
+      }
+    }
+  }
+
+  async function loadChatsFromServer() {
+    try {
+      chats = await Store.list();
+      if (chats.length) {
+        selectChat(chats[0].id);
+      } else {
+        startNewChat();
+      }
+    } catch (err) {
+      logout();
+    }
+  }
+
+  function logout() {
+    setToken(null);
+    currentUser = null;
+    updateUserBox();
+    chats = [];
+    activeId = null;
+    activeChat = null;
+    startNewChat();
+    if (authEnabled) showAuthModal('login');
+  }
+
   // ---------------------- Sidebar / chats ----------------------
 
   function renderSidebar() {
     UI.renderChatList(chats, activeId, {
       onSelect: selectChat,
       onDelete: function (id) {
-        ChatStorage.deleteChat(id);
-        chats = chats.filter(function (chat) { return chat.id !== id; });
+        Store.remove(id).catch(function () {}).then(function () {
+          chats = chats.filter(function (chat) { return chat.id !== id; });
 
-        if (id === activeId) {
-          if (chats.length) {
-            selectChat(chats[0].id);
+          if (id === activeId) {
+            if (chats.length) {
+              selectChat(chats[0].id);
+            } else {
+              startNewChat();
+            }
           } else {
-            startNewChat();
+            renderSidebar();
           }
-        } else {
-          renderSidebar();
-        }
+        });
       }
     });
     updateExportButton();
@@ -383,7 +595,13 @@ document.addEventListener('DOMContentLoaded', function () {
     clearAttachment();
 
     if (!activeChat) {
-      activeChat = ChatStorage.createChat(text ? text.slice(0, 30) : 'Image chat');
+      try {
+        activeChat = await Store.create(text ? text.slice(0, 30) : 'Image chat');
+      } catch (err) {
+        notify(authEnabled ? 'Chat save nahi hua. Dobara login karo.' : 'Chat save nahi hua.');
+        if (authEnabled) showAuthModal('login');
+        return;
+      }
       activeId = activeChat.id;
     }
 
@@ -394,7 +612,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (chatRef.messages.length === 1) {
       chatRef.title = text ? text.slice(0, 30) : 'Image chat';
     }
-    ChatStorage.updateChat(chatRef);
+    await persistChat(chatRef);
     renderSidebar();
 
     UI.addUserMessage(text, imageData);
@@ -434,7 +652,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (lastAssistant === -1) return;
 
     msgs.splice(lastAssistant, 1);
-    ChatStorage.updateChat(chatRef);
+    persistChat(chatRef);
 
     var list = $('messages');
     if (list) {
@@ -490,7 +708,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       if (replyText) {
         chatRef.messages.push({ role: 'assistant', content: replyText });
-        ChatStorage.updateChat(chatRef);
+        persistChat(chatRef);
         if (bot) {
           UI.addActions(bot, function () { return replyText; });
         }
@@ -513,7 +731,7 @@ document.addEventListener('DOMContentLoaded', function () {
     try {
       var response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         signal: controller ? controller.signal : undefined,
         body: JSON.stringify({
           messages: requestMessages,
@@ -523,6 +741,10 @@ document.addEventListener('DOMContentLoaded', function () {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+          return;
+        }
         var errorBody = {};
         try {
           errorBody = await response.json();
@@ -566,7 +788,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
           var fallbackResponse = await fetch('/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(),
             signal: controller ? controller.signal : undefined,
             body: JSON.stringify({
               messages: requestMessages,
@@ -583,6 +805,10 @@ document.addEventListener('DOMContentLoaded', function () {
           }
 
           if (!fallbackResponse.ok || fallbackBody.error) {
+            if (fallbackResponse.status === 401) {
+              logout();
+              return;
+            }
             handleError((fallbackBody && fallbackBody.error) || 'SERVER_ERROR', lastUserText);
             return;
           }
@@ -817,16 +1043,82 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  // ---------------------- Boot ----------------------
+  // ---------------------- Auth events ----------------------
 
-  chats = ChatStorage.loadChats();
-  UI.setTheme(ChatStorage.loadTheme());
+  var authForm = $('auth-form');
+  if (authForm) authForm.addEventListener('submit', handleAuthSubmit);
 
-  if (chats.length) {
-    selectChat(chats[0].id);
-  } else {
-    startNewChat();
+  var authSwitch = $('auth-switch-btn');
+  if (authSwitch) {
+    authSwitch.addEventListener('click', function () {
+      showAuthModal(authMode === 'login' ? 'signup' : 'login');
+    });
   }
 
-  updateSendState();
+  var logoutBtn = $('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', function () {
+      logout();
+    });
+  }
+
+  // ---------------------- Boot ----------------------
+
+  async function boot() {
+    UI.setTheme(ChatStorage.loadTheme());
+
+    try {
+      var configRes = await fetch('/api/config');
+      var config = await configRes.json();
+      authEnabled = !!config.authEnabled;
+    } catch (err) {
+      authEnabled = false;
+    }
+
+    if (!authEnabled) {
+      updateUserBox();
+      chats = ChatStorage.loadChats();
+      if (chats.length) {
+        selectChat(chats[0].id);
+      } else {
+        startNewChat();
+      }
+      updateSendState();
+      return;
+    }
+
+    token = null;
+    try {
+      var storedToken = localStorage.getItem('askgpt_token');
+      if (storedToken) token = storedToken;
+    } catch (err) {
+      token = null;
+    }
+
+    if (!token) {
+      startNewChat();
+      showAuthModal('login');
+      updateSendState();
+      return;
+    }
+
+    try {
+      var meRes = await fetch('/api/auth/me', { headers: authHeaders() });
+      var me = await meRes.json();
+      if (!meRes.ok || !me.user) throw new Error('UNAUTHORIZED');
+      currentUser = me.user.email;
+      updateUserBox();
+      await loadChatsFromServer();
+    } catch (err) {
+      setToken(null);
+      currentUser = null;
+      updateUserBox();
+      startNewChat();
+      showAuthModal('login');
+    }
+
+    updateSendState();
+  }
+
+  boot();
 });

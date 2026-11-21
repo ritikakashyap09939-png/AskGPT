@@ -37,6 +37,7 @@ async function chatCompletion(messages, options = {}) {
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     const err = new Error(`LLM API error ${res.status}: ${text}`);
+    err.status = res.status;
     err.code = res.status === 429 ? 'RATE_LIMIT' : 'SERVER_ERROR';
     throw err;
   }
@@ -95,10 +96,11 @@ async function streamChatCompletion(messages, onChunk, options = {}) {
     signal: controller.signal,
   });
 
-  if (!res.ok) {
+if (!res.ok) {
     const text = await res.text().catch(() => '');
     const err = new Error(`LLM API error ${res.status}: ${text}`);
-    err.code = 'SERVER_ERROR';
+    err.status = res.status;
+    err.code = res.status === 429 ? 'RATE_LIMIT' : 'SERVER_ERROR';
     throw err;
   }
 
