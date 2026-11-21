@@ -154,7 +154,7 @@ body {
   white-space: nowrap;
 }
 
-.sidebar-close {
+.sidebar .sidebar-close {
   display: none;
 }
 
@@ -402,12 +402,17 @@ html[data-theme="dark"] .theme-toggle-thumb {
 }
 
 .menu-btn {
+  display: none;
   flex-direction: column;
   justify-content: center;
   gap: 3px;
   width: 36px;
   height: 36px;
   padding: 0;
+}
+
+.topbar .menu-btn {
+  display: none;
 }
 
 .menu-btn-bar {
@@ -500,6 +505,10 @@ html[data-theme="dark"] .theme-toggle-thumb {
   box-shadow: var(--shadow-sm);
   transition: transform var(--transition), border-color var(--transition),
     background-color var(--transition), box-shadow var(--transition);
+}
+
+.suggestion-card:last-child {
+  grid-column: 1 / -1;
 }
 
 .suggestion-card:hover {
@@ -1121,12 +1130,16 @@ html[data-theme="dark"] .composer {
     transform: translateX(0);
   }
 
-  .sidebar-close {
+  .sidebar .sidebar-close {
     display: inline-grid;
   }
 
   .topbar {
     display: flex;
+  }
+
+  .topbar .menu-btn {
+    display: inline-grid;
   }
 
   .composer {
