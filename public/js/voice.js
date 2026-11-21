@@ -444,8 +444,6 @@ const Voice = (function () {
     return !!speaking;
   }
 
-  window.Voice = Voice;
-
   return {
     init: init,
     speak: speak,
@@ -454,3 +452,5 @@ const Voice = (function () {
     isSpeaking: isSpeaking,
   };
 })();
+
+window.Voice = Voice;

@@ -500,10 +500,10 @@ document.addEventListener('DOMContentLoaded', function () {
       UI.scrollToBottom();
 
       if (speak && inputMode === 'voice' && replyText && window.Voice) {
-        if (typeof Voice.isSpeaking === 'function' && Voice.isSpeaking()) {
-          Voice.stop();
+        if (typeof window.Voice.isSpeaking === 'function' && window.Voice.isSpeaking()) {
+          window.Voice.stop();
         }
-        Voice.speak(replyText);
+        window.Voice.speak(replyText);
       }
     }
 
@@ -806,8 +806,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  if (window.Voice && typeof Voice.init === 'function') {
-    Voice.init({
+  if (window.Voice && typeof window.Voice.init === 'function') {
+    window.Voice.init({
       onTranscript: function (text) {
         sendMessage(text, 'voice');
       },
