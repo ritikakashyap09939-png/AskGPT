@@ -13,6 +13,7 @@ const chatRouter = require('./routes/chat');
 const authRouter = require('./routes/auth');
 const chatsRouter = require('./routes/chats');
 const imageRouter = require('./routes/image');
+const usageRouter = require('./routes/usage');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -69,6 +70,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/chats', chatsRouter);
 app.use('/api', chatRouter);
 app.use('/api', imageRouter);
+app.use('/api', usageRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

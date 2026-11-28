@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', function () {
   var lastFailedUserMessage = null; // { text, imageData, inputMode, requestMessages }
   var imageMode = false; // whether to use image generation for next message
   var voiceChatActive = false; // whether voice conversation mode is active
+  var usageData = null; // { chatUsed, chatLimit, imageUsed, imageLimit, resetAt }
+  var usagePollTimer = null;
 
   var ERROR_MESSAGES = {
     RATE_LIMIT: {
@@ -54,6 +56,11 @@ document.addEventListener('DOMContentLoaded', function () {
       hi: 'Prompt bahut lamba hai. Chhota likho.',
       en: 'Prompt is too long. Please shorten it.',
       'hi-en': 'Prompt bahut lamba hai. Chhota likho.'
+    },
+    DAILY_LIMIT: {
+      hi: 'Aaj ki limit khatam ho gayi hai. Kal dobara try karo.',
+      en: 'Daily limit reached. Please try again tomorrow.',
+      'hi-en': 'Aaj ki limit khatam ho gayi hai. Kal dobara try karo.'
     }
   };
 
@@ -89,6 +96,76 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     var lang = detectMessageLang(lastUserText);
     return table[lang] || table.en || 'Something went wrong. Please try again.';
+  }
+
+  function fetchUsage() {
+    return fetch('/api/usage', { headers: authHeaders() })
+      .then(function (res) {
+        if (!res.ok) return null;
+        return res.json();
+      })
+      .then(function (data) {
+        if (data) {
+          usageData = data;
+          updateUsageDisplay();
+        }
+        return data;
+      })
+      .catch(function () {
+        return null;
+      });
+  }
+
+  function updateUsageDisplay() {
+    var displayEl = $('usage-display');
+    if (!displayEl || !usageData) return;
+
+    var chatUsed = usageData.chatUsed || 0;
+    var chatLimit = usageData.chatLimit || 0;
+    var imageUsed = usageData.imageUsed || 0;
+    var imageLimit = usageData.imageLimit || 0;
+    var resetAt = usageData.resetAt;
+
+    // Determine if we're near limit (last 5)
+    var chatNearLimit = chatLimit > 0 && (chatLimit - chatUsed) <= 5;
+    var imageNearLimit = imageLimit > 0 && (imageLimit - imageUsed) <= 5;
+
+    var chatText = chatUsed + ' / ' + chatLimit + ' chats';
+    var imageText = imageUsed + ' / ' + imageLimit + ' images';
+
+    var html = '<div class="usage-chat' + (chatNearLimit ? ' usage-warn' : '') + '">' + chatText + '</div>';
+    html += '<div class="usage-image' + (imageNearLimit ? ' usage-warn' : '') + '">' + imageText + '</div>';
+
+    if (resetAt) {
+      var resetDate = new Date(resetAt);
+      var now = new Date();
+      var diffMs = resetDate - now;
+      var hours = Math.floor(diffMs / (1000 * 60 * 60));
+      var minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      if (hours > 0) {
+        html += '<div class="usage-reset">Resets in ' + hours + 'h ' + minutes + 'm</div>';
+      } else if (minutes > 0) {
+        html += '<div class="usage-reset">Resets in ' + minutes + 'm</div>';
+      } else {
+        html += '<div class="usage-reset">Resets soon</div>';
+      }
+    }
+
+    displayEl.innerHTML = html;
+    displayEl.hidden = false;
+  }
+
+  function startUsagePolling() {
+    if (usagePollTimer) clearInterval(usagePollTimer);
+    fetchUsage();
+    usagePollTimer = setInterval(fetchUsage, 30000); // Poll every 30 seconds
+  }
+
+  function stopUsagePolling() {
+    if (usagePollTimer) {
+      clearInterval(usagePollTimer);
+      usagePollTimer = null;
+    }
   }
 
   // Image generation keywords for auto-detection
@@ -717,7 +794,7 @@ document.addEventListener('DOMContentLoaded', function () {
         imgBtn.classList.remove('active');
       }
       var inputEl = $('user-input');
-      if (inputEl) inputEl.placeholder = 'Kuch bhi poochho...';
+      if (inputEl) inputEl.placeholder = 'Message AskGPT...';
     }
 
     if (useImageGen) {
@@ -783,13 +860,13 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (err) {
           errorBody = {};
         }
-        handleError(errorBody.error || 'SERVER_ERROR', lastUserText);
+        handleError(errorBody.error || 'SERVER_ERROR', lastUserText, errorBody);
         return;
       }
 
       var data = await response.json();
       if (data.error) {
-        handleError(data.error, lastUserText);
+        handleError(data.error, lastUserText, data);
         return;
       }
 
@@ -844,7 +921,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       if (!aborted) {
         var code = (err && err.code) || 'SERVER_ERROR';
-        handleError(code, lastUserText);
+        handleError(code, lastUserText, {});
       }
     } finally {
       sending = false;
@@ -1017,7 +1094,7 @@ document.addEventListener('DOMContentLoaded', function () {
         } catch (err) {
           errorBody = {};
         }
-        handleError(errorBody.error || 'SERVER_ERROR', lastUserText);
+        handleError(errorBody.error || 'SERVER_ERROR', lastUserText, errorBody);
         return;
       }
 
@@ -1075,7 +1152,7 @@ document.addEventListener('DOMContentLoaded', function () {
               logout();
               return;
             }
-            handleError((fallbackBody && fallbackBody.error) || 'SERVER_ERROR', lastUserText);
+            handleError((fallbackBody && fallbackBody.error) || 'SERVER_ERROR', lastUserText, fallbackBody);
             return;
           }
 
@@ -1086,7 +1163,7 @@ document.addEventListener('DOMContentLoaded', function () {
       } else {
         var data = await response.json();
         if (data.error) {
-          handleError(data.error, lastUserText);
+          handleError(data.error, lastUserText, data);
           return;
         }
         full = data.reply || '';
@@ -1122,13 +1199,29 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  function handleError(code, lastUserText) {
+  function handleError(code, lastUserText, errorBody) {
     UI.removeTyping();
 
     var message = errorMessage(code, lastUserText);
     var bot = UI.addBotMessage();
     bot.content.textContent = message;
     UI.scrollToBottom();
+
+    if (code === 'DAILY_LIMIT') {
+      // Disable send button and update usage display with reset time
+      var sendBtn = $('send-btn');
+      var inputEl = $('user-input');
+      if (sendBtn) sendBtn.disabled = true;
+      if (inputEl) inputEl.disabled = true;
+
+      if (errorBody && errorBody.resetAt) {
+        usageData = usageData || {};
+        usageData.resetAt = errorBody.resetAt;
+        updateUsageDisplay();
+      }
+      // No retry button for DAILY_LIMIT
+      return;
+    }
 
     if (code === 'SERVER_ERROR' && lastFailedUserMessage) {
       var retryBtn = document.createElement('button');
@@ -1248,7 +1341,7 @@ document.addEventListener('DOMContentLoaded', function () {
       imageBtn.classList.toggle('active', imageMode);
       var inputEl = $('user-input');
       if (inputEl) {
-        inputEl.placeholder = imageMode ? 'Kaisi image chahiye? Likho...' : 'Kuch bhi poochho...';
+        inputEl.placeholder = imageMode ? 'Kaisi image chahiye? Likho...' : 'Message AskGPT...';
       }
     });
   }
@@ -1492,6 +1585,7 @@ document.addEventListener('DOMContentLoaded', function () {
         startNewChat();
       }
       updateSendState();
+      startUsagePolling();
       return;
     }
 
@@ -1518,6 +1612,7 @@ document.addEventListener('DOMContentLoaded', function () {
       currentUser = me.user.email;
       updateUserBox();
       await loadChatsFromServer();
+      startUsagePolling();
     } catch (err) {
       setToken(null);
       currentUser = null;

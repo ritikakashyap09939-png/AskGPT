@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const llm = require('../services/llm');
 const SYSTEM_PROMPT = require('../config/systemPrompt');
 const auth = require('../middleware/auth');
+const { usageLimit, refundUsage } = require('../middleware/usageLimit');
 
 // Guest mode when no database is configured: skip JWT auth for /api/chat
 const AUTH_ENABLED = !!process.env.MONGODB_URI;
@@ -34,11 +35,13 @@ const chatLimiter = rateLimit({
  * Body: { messages: [{role, content}], inputMode: "text"|"voice", stream?: boolean }
  * Returns: { reply } or streaming text/event-stream
  */
-router.post('/chat', maybeAuth, chatLimiter, async (req, res) => {
+router.post('/chat', maybeAuth, chatLimiter, usageLimit('chat'), async (req, res) => {
   try {
     const { messages, inputMode, stream } = req.body;
 
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      // Refund usage since validation failed
+      await refundUsage(req);
       logFailure('chat', new Error('INVALID_INPUT'), 400);
       return res.status(400).json({ error: 'INVALID_INPUT' });
     }
@@ -150,14 +153,22 @@ for (const m of messages) {
           console.log('[SSE] upstream request was aborted because the client disconnected');
           return;
         }
+        // Refund on provider error
+        await refundUsage(req);
         res.write(`data: ${JSON.stringify({ error: err.code || 'SERVER_ERROR' })}\n\n`);
         res.end();
       } finally {
         clearInterval(ping);
       }
     } else {
-      const reply = await llm.chatCompletion(fullMessages);
-      res.json({ reply });
+      try {
+        const reply = await llm.chatCompletion(fullMessages);
+        res.json({ reply });
+      } catch (err) {
+        // Refund on provider error
+        await refundUsage(req);
+        throw err;
+      }
     }
   } catch (err) {
     logFailure('chat', err, 500);

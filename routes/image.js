@@ -4,6 +4,7 @@ const router = express.Router();
 const rateLimit = require('express-rate-limit');
 const imageService = require('../services/image');
 const auth = require('../middleware/auth');
+const { usageLimit, refundUsage } = require('../middleware/usageLimit');
 
 // Guest mode when no database is configured: skip JWT auth for /api/image
 const AUTH_ENABLED = !!process.env.MONGODB_URI;
@@ -61,23 +62,26 @@ const imageLimiter = rateLimit({
  * Body: { prompt }
  * Returns: { image: "data:<mime>;base64,<data>", text }
  */
-router.post('/image', maybeAuth, imageLimiter, async (req, res) => {
+router.post('/image', maybeAuth, imageLimiter, usageLimit('image'), async (req, res) => {
   try {
     const { prompt } = req.body;
 
     if (typeof prompt !== 'string' || !prompt.trim()) {
+      await refundUsage(req);
       logFailure('image', new Error('INVALID_INPUT'), 400);
       return res.status(400).json({ error: 'INVALID_INPUT' });
     }
 
     const trimmed = prompt.trim();
     if (trimmed.length > 1000) {
+      await refundUsage(req);
       logFailure('image', new Error('PROMPT_TOO_LONG'), 400);
       return res.status(400).json({ error: 'PROMPT_TOO_LONG' });
     }
 
     // Safety check
     if (checkSafety(trimmed)) {
+      await refundUsage(req);
       logFailure('image', new Error('IMAGE_BLOCKED'), 400);
       return res.status(400).json({ error: 'IMAGE_BLOCKED' });
     }
@@ -85,6 +89,8 @@ router.post('/image', maybeAuth, imageLimiter, async (req, res) => {
     const result = await imageService.generateImage(trimmed);
     res.json(result);
   } catch (err) {
+    // Refund on provider error
+    await refundUsage(req);
     logFailure('image', err);
     const code = err.code || 'SERVER_ERROR';
     if (code === 'RATE_LIMIT' || code === 'IMAGE_UNAVAILABLE' || code === 'IMAGE_BLOCKED' || code === 'MISSING_API_KEY' || code === 'INVALID_INPUT' || code === 'PROMPT_TOO_LONG') {
