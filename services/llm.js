@@ -280,16 +280,23 @@ async function chatCompletion(messages, options = {}) {
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
-    try {
-      return await completionAttempt(model, messages, options);
-    } catch (err) {
-      lastErr = err;
-      if (!canFallback(err)) throw err;
-      if (i === models.length - 1) break;
-      console.warn(
-        `[llm] model ${model} failed (${err.code || err.status}); trying next model ${models[i + 1]}`
-      );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await completionAttempt(model, messages, options);
+      } catch (err) {
+        lastErr = err;
+        if (!canFallback(err)) throw err;
+        if (attempt === 0) {
+          console.warn(`[llm] model ${model} attempt ${attempt + 1} failed (${err.code || err.status}); retrying in 1s`);
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+      }
     }
+    if (i === models.length - 1) break;
+    console.warn(
+      `[llm] model ${model} failed (${lastErr.code || lastErr.status}); trying next model ${models[i + 1]}`
+    );
   }
 
   throw exhaustedError(lastErr);
@@ -311,16 +318,23 @@ async function streamChatCompletion(messages, onChunk, options = {}) {
 
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
-    try {
-      return await streamAttempt(model, messages, onChunk, options);
-    } catch (err) {
-      lastErr = err;
-      if (!canFallback(err)) throw err;
-      if (i === models.length - 1) break;
-      console.warn(
-        `[llm] model ${model} failed (${err.code || err.status}); trying next model ${models[i + 1]}`
-      );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await streamAttempt(model, messages, onChunk, options);
+      } catch (err) {
+        lastErr = err;
+        if (!canFallback(err)) throw err;
+        if (attempt === 0) {
+          console.warn(`[llm] model ${model} attempt ${attempt + 1} failed (${err.code || err.status}); retrying in 1s`);
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+      }
     }
+    if (i === models.length - 1) break;
+    console.warn(
+      `[llm] model ${model} failed (${lastErr.code || lastErr.status}); trying next model ${models[i + 1]}`
+    );
   }
 
   throw exhaustedError(lastErr);

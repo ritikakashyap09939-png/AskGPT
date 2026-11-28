@@ -12,6 +12,7 @@ const mongoose = require('mongoose');
 const chatRouter = require('./routes/chat');
 const authRouter = require('./routes/auth');
 const chatsRouter = require('./routes/chats');
+const imageRouter = require('./routes/image');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -67,6 +68,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/auth', authRouter);
 app.use('/api/chats', chatsRouter);
 app.use('/api', chatRouter);
+app.use('/api', imageRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -75,7 +77,12 @@ app.get('/api/health', (req, res) => {
 
 // Runtime config for the frontend (guest mode when no database)
 app.get('/api/config', (req, res) => {
-  res.json({ authEnabled: !!process.env.MONGODB_URI });
+  const google = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  const github = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
+  res.json({
+    authEnabled: !!process.env.MONGODB_URI,
+    providers: { google, github },
+  });
 });
 
 // Catch-all: serve index.html for SPA

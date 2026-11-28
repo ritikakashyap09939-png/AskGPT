@@ -13,6 +13,11 @@ document.addEventListener('DOMContentLoaded', function () {
   var token = null;
   var currentUser = null;
   var authMode = 'login';
+  var providers = {};
+  var pendingAuthError = null;
+  var lastFailedUserMessage = null; // { text, imageData, inputMode, requestMessages }
+  var imageMode = false; // whether to use image generation for next message
+  var voiceChatActive = false; // whether voice conversation mode is active
 
   var ERROR_MESSAGES = {
     RATE_LIMIT: {
@@ -34,6 +39,21 @@ document.addEventListener('DOMContentLoaded', function () {
       hi: 'Server mein kuch galat ho gaya. Thodi der baad try karo.',
       en: 'Something went wrong on the server. Please try again later.',
       'hi-en': 'Server mein kuch galat ho gaya. Thodi der baad try karo.'
+    },
+    IMAGE_UNAVAILABLE: {
+      hi: 'Abhi image nahi ban sakti, thodi der baad try karo.',
+      en: 'Image generation is unavailable right now. Please try again later.',
+      'hi-en': 'Abhi image nahi ban sakti, thodi der baad try karo.'
+    },
+    IMAGE_BLOCKED: {
+      hi: 'Ye request allow nahi hai. Kuch aur likho.',
+      en: 'This request was blocked. Please try a different prompt.',
+      'hi-en': 'Ye request allow nahi hai. Kuch aur likho.'
+    },
+    PROMPT_TOO_LONG: {
+      hi: 'Prompt bahut lamba hai. Chhota likho.',
+      en: 'Prompt is too long. Please shorten it.',
+      'hi-en': 'Prompt bahut lamba hai. Chhota likho.'
     }
   };
 
@@ -69,6 +89,29 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     var lang = detectMessageLang(lastUserText);
     return table[lang] || table.en || 'Something went wrong. Please try again.';
+  }
+
+  // Image generation keywords for auto-detection
+  var IMAGE_KEYWORDS = [
+    // English
+    'generate image', 'create image', 'draw', 'create a picture', 'make an image',
+    'generate a picture', 'create picture', 'make picture', 'draw a picture',
+    'generate art', 'create art', 'make art', 'draw art', 'paint', 'illustrate',
+    'image of', 'picture of', 'photo of', 'visualize', 'render',
+    // Hindi/Hinglish
+    'image banao', 'photo banao', 'tasveer banao', 'picture banao',
+    'chitra banao', 'drawing banao', 'art banao', 'image banana',
+    'photo banana', 'tasveer banana', 'picture banana',
+    'image kaise banaye', 'photo kaise banaye', 'tasveer kaise banaye',
+    'ek image banao', 'ek photo banao', 'ek tasveer banao',
+  ];
+
+  function isImagePrompt(text) {
+    var value = String(text == null ? '' : text).toLowerCase().trim();
+    for (var i = 0; i < IMAGE_KEYWORDS.length; i += 1) {
+      if (value.indexOf(IMAGE_KEYWORDS[i]) !== -1) return true;
+    }
+    return false;
   }
 
   // ---------------------- Auth / storage ----------------------
@@ -165,7 +208,8 @@ document.addEventListener('DOMContentLoaded', function () {
       INVALID_CREDENTIALS: 'Email ya password galat hai.',
       RATE_LIMIT: 'Bahut zyada requests. Thodi der baad try karo.',
       SERVER_ERROR: 'Server error. Dobara try karo.',
-      UNAUTHORIZED: 'Login required hai.'
+      UNAUTHORIZED: 'Login required hai.',
+      OAUTH_ERROR: 'Google ya GitHub login fail ho gaya. Dobara try karo.'
     };
     return map[code] || 'Kuch galat ho gaya. Dobara try karo.';
   }
@@ -199,6 +243,50 @@ document.addEventListener('DOMContentLoaded', function () {
   function hideAuthModal() {
     var modal = $('auth-modal');
     if (modal) modal.hidden = true;
+  }
+
+  function updateOAuthButtons() {
+    var block = $('oauth-block');
+    var google = $('oauth-google');
+    var github = $('oauth-github');
+    var hasGoogle = !!providers.google;
+    var hasGithub = !!providers.github;
+
+    if (block) block.hidden = !(hasGoogle || hasGithub);
+    if (google) google.hidden = !hasGoogle;
+    if (github) github.hidden = !hasGithub;
+  }
+
+  function showAuthError(code) {
+    var errEl = $('auth-error');
+    if (errEl) {
+      errEl.textContent = authErrorMessage(code);
+      errEl.hidden = false;
+    }
+  }
+
+  // Read the OAuth redirect hash (#token=... or #auth_error=1), save the token
+  // exactly like a normal login, and strip the hash from the URL immediately.
+  function consumeOAuthHash() {
+    var hash = window.location.hash || '';
+    if (hash.indexOf('token=') === -1 && hash.indexOf('auth_error') === -1) return;
+
+    var raw = hash.replace(/^#/, '');
+    var params = new URLSearchParams(raw);
+    var tokenParam = params.get('token');
+    var errorParam = params.get('auth_error');
+
+    try {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    } catch (err) {
+      /* ignore */
+    }
+
+    if (tokenParam) {
+      setToken(tokenParam);
+    } else if (errorParam) {
+      pendingAuthError = 'OAUTH_ERROR';
+    }
   }
 
   function updateUserBox() {
@@ -618,6 +706,25 @@ document.addEventListener('DOMContentLoaded', function () {
     UI.addUserMessage(text, imageData);
     UI.scrollToBottom();
 
+    // Determine if this should be an image generation request
+    var useImageGen = imageMode || isImagePrompt(text);
+    // Reset image mode after use (toggle is one-shot)
+    if (imageMode) {
+      imageMode = false;
+      var imgBtn = $('image-btn');
+      if (imgBtn) {
+        imgBtn.setAttribute('aria-pressed', 'false');
+        imgBtn.classList.remove('active');
+      }
+      var inputEl = $('user-input');
+      if (inputEl) inputEl.placeholder = 'Kuch bhi poochho...';
+    }
+
+    if (useImageGen) {
+      await generateImage(chatRef, text, inputMode);
+      return;
+    }
+
     var requestMessages = chatRef.messages.slice(-15).map(function (msg) {
       return { role: msg.role, content: msg.content };
     });
@@ -633,7 +740,159 @@ document.addEventListener('DOMContentLoaded', function () {
       };
     }
 
+    lastFailedUserMessage = {
+      text: text,
+      imageData: imageData,
+      inputMode: inputMode,
+      requestMessages: requestMessages
+    };
+
     await generateReply(chatRef, inputMode, requestMessages);
+  }
+
+  async function generateImage(chatRef, prompt, inputMode) {
+    if (sending || !chatRef) return;
+
+    sending = true;
+    setStopMode(true);
+
+    var lastUserText = prompt;
+
+    UI.showTyping();
+    UI.scrollToBottom();
+
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    abortController = controller;
+
+    try {
+      var response = await fetch('/api/image', {
+        method: 'POST',
+        headers: authHeaders(),
+        signal: controller ? controller.signal : undefined,
+        body: JSON.stringify({ prompt: prompt })
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          logout();
+          return;
+        }
+        var errorBody = {};
+        try {
+          errorBody = await response.json();
+        } catch (err) {
+          errorBody = {};
+        }
+        handleError(errorBody.error || 'SERVER_ERROR', lastUserText);
+        return;
+      }
+
+      var data = await response.json();
+      if (data.error) {
+        handleError(data.error, lastUserText);
+        return;
+      }
+
+      UI.removeTyping();
+
+      // Add bot message with image
+      var bot = UI.addBotMessage();
+      if (data.image) {
+        var img = document.createElement('img');
+        img.className = 'msg-image';
+        img.src = data.image;
+        img.alt = 'Generated image';
+        img.style.maxWidth = '100%';
+        img.style.borderRadius = 'var(--radius-md)';
+        img.style.cursor = 'zoom-in';
+        bot.content.appendChild(img);
+
+        // Click to zoom
+        img.addEventListener('click', function () {
+          openImageZoom(data.image);
+        });
+
+        // Download button
+        var downloadBtn = document.createElement('button');
+        downloadBtn.className = 'msg-action-btn';
+        downloadBtn.type = 'button';
+        downloadBtn.setAttribute('aria-label', 'Download image');
+        downloadBtn.textContent = '⬇';
+        downloadBtn.style.marginTop = '8px';
+        downloadBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          downloadImage(data.image, 'askgpt-image.png');
+        });
+        bot.content.appendChild(document.createElement('br'));
+        bot.content.appendChild(downloadBtn);
+      }
+      if (data.text) {
+        var textEl = document.createElement('div');
+        textEl.className = 'msg-text';
+        textEl.textContent = data.text;
+        bot.content.appendChild(textEl);
+      }
+
+      // Save only "[image]" in chat history, not base64
+      chatRef.messages.push({ role: 'assistant', content: '[image]' });
+      persistChat(chatRef);
+
+      UI.scrollToBottom();
+    } catch (err) {
+      var aborted = (err && (err.name === 'AbortError' || err.code === 'ABORT_ERR')) ||
+        (controller && controller.signal && controller.signal.aborted);
+
+      if (!aborted) {
+        var code = (err && err.code) || 'SERVER_ERROR';
+        handleError(code, lastUserText);
+      }
+    } finally {
+      sending = false;
+      abortController = null;
+      setStopMode(false);
+      UI.removeTyping();
+      updateSendState();
+    }
+  }
+
+  function openImageZoom(src) {
+    var overlay = document.createElement('div');
+    overlay.className = 'image-zoom-overlay';
+    overlay.style.position = 'fixed';
+    overlay.style.inset = '0';
+    overlay.style.zIndex = '1000';
+    overlay.style.background = 'rgba(0,0,0,0.9)';
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
+    overlay.style.cursor = 'zoom-out';
+
+    var img = document.createElement('img');
+    img.src = src;
+    img.style.maxWidth = '90vw';
+    img.style.maxHeight = '90vh';
+    img.style.borderRadius = '8px';
+    img.style.boxShadow = '0 8px 32px rgba(0,0,0,0.5)';
+
+    overlay.appendChild(img);
+    document.body.appendChild(overlay);
+
+    function close() {
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      document.removeEventListener('keydown', onKey);
+    }
+    overlay.addEventListener('click', close);
+    function onKey(ev) { if (ev.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+  }
+
+  function downloadImage(dataUrl, filename) {
+    var link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   function regenerateLast() {
@@ -713,11 +972,18 @@ document.addEventListener('DOMContentLoaded', function () {
           UI.addActions(bot, function () { return replyText; });
         }
         added = true;
+        lastFailedUserMessage = null;
       }
 
       UI.scrollToBottom();
 
-      if (speak && inputMode === 'voice' && replyText && window.Voice) {
+      // Voice conversation mode: use the special callback that handles auto-restart of listening
+      if (speak && inputMode === 'voice' && replyText && window.Voice && voiceChatActive) {
+        if (typeof window.Voice.onVoiceChatBotReply === 'function') {
+          window.Voice.onVoiceChatBotReply(replyText);
+        }
+      } else if (speak && inputMode === 'voice' && replyText && window.Voice) {
+        // Regular voice input mode (single shot)
         if (typeof window.Voice.isSpeaking === 'function' && window.Voice.isSpeaking()) {
           window.Voice.stop();
         }
@@ -835,6 +1101,7 @@ document.addEventListener('DOMContentLoaded', function () {
         (controller && controller.signal && controller.signal.aborted);
 
       if (aborted) {
+        lastFailedUserMessage = null;
         finalize(full, false);
       } else {
         var code = (err && err.code) || 'SERVER_ERROR';
@@ -862,6 +1129,59 @@ document.addEventListener('DOMContentLoaded', function () {
     var bot = UI.addBotMessage();
     bot.content.textContent = message;
     UI.scrollToBottom();
+
+    if (code === 'SERVER_ERROR' && lastFailedUserMessage) {
+      var retryBtn = document.createElement('button');
+      retryBtn.className = 'msg-action-btn retry-btn';
+      retryBtn.type = 'button';
+      retryBtn.setAttribute('aria-label', 'Retry');
+      retryBtn.textContent = 'Retry';
+      retryBtn.style.marginTop = '8px';
+      retryBtn.style.fontSize = '0.85em';
+      retryBtn.addEventListener('click', function () {
+        retryFailedMessage(bot);
+      });
+      bot.content.appendChild(document.createElement('br'));
+      bot.content.appendChild(retryBtn);
+    }
+  }
+
+  function retryFailedMessage(errorBot) {
+    if (!lastFailedUserMessage || !activeChat) return;
+
+    var chatRef = activeChat;
+    var msgs = chatRef.messages || [];
+
+    var lastUserIdx = -1;
+    for (var i = msgs.length - 1; i >= 0; i -= 1) {
+      if (msgs[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx !== -1) {
+      msgs.splice(lastUserIdx, 1);
+    }
+
+    var list = $('messages');
+    if (list) {
+      var users = list.querySelectorAll('.message.user');
+      if (users.length) {
+        var lastUser = users[users.length - 1];
+        if (lastUser.parentNode) lastUser.parentNode.removeChild(lastUser);
+      }
+    }
+
+    if (errorBot && errorBot.parentNode) {
+      errorBot.parentNode.removeChild(errorBot);
+    }
+
+    lastFailedUserMessage = null;
+
+    persistChat(chatRef);
+    renderSidebar();
+
+    sendMessage(lastFailedUserMessage.text, lastFailedUserMessage.inputMode);
   }
 
   // ---------------------- Export ----------------------
@@ -917,6 +1237,49 @@ document.addEventListener('DOMContentLoaded', function () {
   if (newChatBtn) {
     newChatBtn.addEventListener('click', function () {
       startNewChat();
+    });
+  }
+
+  var imageBtn = $('image-btn');
+  if (imageBtn) {
+    imageBtn.addEventListener('click', function () {
+      imageMode = !imageMode;
+      imageBtn.setAttribute('aria-pressed', imageMode ? 'true' : 'false');
+      imageBtn.classList.toggle('active', imageMode);
+      var inputEl = $('user-input');
+      if (inputEl) {
+        inputEl.placeholder = imageMode ? 'Kaisi image chahiye? Likho...' : 'Kuch bhi poochho...';
+      }
+    });
+  }
+
+  var voiceChatBtn = $('voice-chat-btn');
+  if (voiceChatBtn && window.Voice) {
+    voiceChatBtn.addEventListener('click', function () {
+      if (window.Voice.isVoiceChatActive()) {
+        window.Voice.stopVoiceChat();
+        voiceChatBtn.classList.remove('active');
+        voiceChatBtn.setAttribute('aria-pressed', 'false');
+        voiceChatActive = false;
+      } else {
+        if (sending) {
+          stopGeneration();
+        }
+        voiceChatActive = true;
+        voiceChatBtn.classList.add('active');
+        voiceChatBtn.setAttribute('aria-pressed', 'true');
+        window.Voice.startVoiceChat({
+          onTranscript: function (text) {
+            sendMessage(text, 'voice');
+          },
+          onError: function (err) {
+            notify(err);
+            voiceChatBtn.classList.remove('active');
+            voiceChatBtn.setAttribute('aria-pressed', 'false');
+            voiceChatActive = false;
+          }
+        });
+      }
     });
   }
 
@@ -1039,9 +1402,34 @@ document.addEventListener('DOMContentLoaded', function () {
       },
       onStateChange: function () {
         /* voice.js updates the mic button itself */
+      },
+      onVoiceChatTranscript: function (text) {
+        // Called when user speaks in voice chat mode
+        sendMessage(text, 'voice');
+      },
+      onVoiceChatEnd: function () {
+        // Called when voice chat mode ends
+        voiceChatActive = false;
+        var vcBtn = $('voice-chat-btn');
+        if (vcBtn) {
+          vcBtn.classList.remove('active');
+          vcBtn.setAttribute('aria-pressed', 'false');
+        }
       }
     });
   }
+
+  // Expose onVoiceChatEnd for voice.js to call
+  window.App = {
+    onVoiceChatEnd: function () {
+      voiceChatActive = false;
+      var vcBtn = $('voice-chat-btn');
+      if (vcBtn) {
+        vcBtn.classList.remove('active');
+        vcBtn.setAttribute('aria-pressed', 'false');
+      }
+    }
+  };
 
   // ---------------------- Auth events ----------------------
 
@@ -1052,6 +1440,20 @@ document.addEventListener('DOMContentLoaded', function () {
   if (authSwitch) {
     authSwitch.addEventListener('click', function () {
       showAuthModal(authMode === 'login' ? 'signup' : 'login');
+    });
+  }
+
+  var oauthGoogle = $('oauth-google');
+  if (oauthGoogle) {
+    oauthGoogle.addEventListener('click', function () {
+      window.location.assign('/api/auth/google');
+    });
+  }
+
+  var oauthGithub = $('oauth-github');
+  if (oauthGithub) {
+    oauthGithub.addEventListener('click', function () {
+      window.location.assign('/api/auth/github');
     });
   }
 
@@ -1071,9 +1473,15 @@ document.addEventListener('DOMContentLoaded', function () {
       var configRes = await fetch('/api/config');
       var config = await configRes.json();
       authEnabled = !!config.authEnabled;
+      providers = config.providers || {};
     } catch (err) {
       authEnabled = false;
+      providers = {};
     }
+    updateOAuthButtons();
+
+    // Handle OAuth redirect (token or error) before deciding the login flow.
+    consumeOAuthHash();
 
     if (!authEnabled) {
       updateUserBox();
@@ -1098,6 +1506,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!token) {
       startNewChat();
       showAuthModal('login');
+      if (pendingAuthError) showAuthError(pendingAuthError);
       updateSendState();
       return;
     }
@@ -1115,6 +1524,7 @@ document.addEventListener('DOMContentLoaded', function () {
       updateUserBox();
       startNewChat();
       showAuthModal('login');
+      if (pendingAuthError) showAuthError(pendingAuthError);
     }
 
     updateSendState();

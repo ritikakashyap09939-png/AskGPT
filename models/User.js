@@ -12,7 +12,17 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: true,
+      required: false,
+    },
+    // OAuth providers this account is linked to ("google", "github", or unset for email/password).
+    provider: {
+      type: String,
+      default: null,
+    },
+    // Provider-specific user id (e.g. Google `sub`, GitHub user id).
+    providerId: {
+      type: String,
+      default: null,
     },
   },
   { timestamps: true }
